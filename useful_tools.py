@@ -1,65 +1,28 @@
 import os
 import json
+import pickle
+import numpy as np
+from sklearn.model_selection import ParameterGrid, cross_val_score
+from sklearn.experimental import enable_halving_search_cv  # noqa: F401
+from sklearn.model_selection import HalvingGridSearchCV
+from tqdm import tqdm
 
 class UsefulTools:
     """
-        useful_tools.py
-        ===============
+    useful_tools.py
+    ===============
 
-        A general-purpose utility module that provides commonly needed tools across data science,
-        machine learning, and application development projects.
+    A general-purpose utility module that provides commonly needed tools across data science,
+    machine learning, and application development projects.
 
-        Currently implemented utilities:
-        - JsonCache: A static class for caching JSON-serializable data to disk with validation.
-
-        Planned extensions:
-        - TextCleaner: Utilities for normalizing and preprocessing raw text data
-        - Timer: Context manager for measuring execution time
-        - Logger: Lightweight, customizable logging wrapper
-        - PlotHelper: Easy-to-use plotting wrappers for common visualizations
-
-        Classes
-        -------
-
-        class UsefulTools.JsonCache
-        ---------------------------
-        Static methods to cache data to and load data from local JSON files. Designed for flexible use
-        across various components of a project that benefit from caching (e.g., API responses, model results, etc.).
-
-        Methods:
-            - load(filename: str, expected_type: type = list) -> Optional[Any]
-                Loads JSON content from a file if it exists and matches the expected data type.
-                Returns the loaded object or None if the file is missing or invalid.
-
-            - save(data: Any, filename: str) -> None
-                Saves a Python object (must be JSON-serializable) to the specified file path.
-                Overwrites the file if it already exists.
-
-        Usage Example
-        -------------
-
-        from useful_tools import UsefulTools
-
-        # Save data
-        data = [{"source": "cnn", "title": "News headline"}]
-        UsefulTools.JsonCache.save(data, "cache_file.json")
-
-        # Load data
-        loaded_data = UsefulTools.JsonCache.load("cache_file.json", expected_type=list)
-        if loaded_data is not None:
-            print("Cache hit:", len(loaded_data), "items")
-        else:
-            print("Cache miss or file corrupted.")
-
+    Includes:
+    - JsonCache: For caching data to/from disk
+    - CVGridSearch: For reusable, cacheable hyperparameter tuning via cross-validation
     """
-
 
     class JsonCache:
         @staticmethod
         def load(filename: str, expected_type: type = list):
-            """
-            Load JSON data from file. Optionally check that it matches expected_type (e.g., list or dict).
-            """
             if not os.path.exists(filename):
                 return None
             try:
@@ -76,36 +39,131 @@ class UsefulTools:
 
         @staticmethod
         def save(data, filename: str):
-            """
-            Save any JSON-serializable data to a file.
-            """
             try:
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                 print(f"Saved data to cache file '{filename}'.")
             except IOError as e:
                 print(f"Failed to save cache to '{filename}': {e}")
-        import json
 
         @staticmethod
         def compare_json_files(file1: str, file2: str) -> bool:
-            """
-            Compares the contents of two JSON files.
-
-            :param file1: Path to the first JSON file
-            :param file2: Path to the second JSON file
-            :return: True if both JSON files have the same data, False otherwise
-            """
             try:
                 with open(file1, 'r', encoding='utf-8') as f1, open(file2, 'r', encoding='utf-8') as f2:
                     data1 = json.load(f1)
                     data2 = json.load(f2)
                 are_equal = data1 == data2
                 if are_equal:
-                    print(f"✅ The contents of '{file1}' and '{file2}' are the same.")
+                    print(f"The contents of '{file1}' and '{file2}' are the same.")
                 else:
-                    print(f"❌ The contents of '{file1}' and '{file2}' differ.")
+                    print(f"The contents of '{file1}' and '{file2}' differ.")
                 return are_equal
             except Exception as e:
                 print(f"Error comparing files: {e}")
                 return False
+
+    class CVGridSearch:
+        def __init__(self, estimator_class, param_grid, cache_file=None, cv=3,
+                     scoring='f1_macro', verbose=True, fixed_params=None):
+            """
+            General-purpose grid search with caching and cross-validation support.
+
+            :param estimator_class: The classifier (e.g., LogisticRegression)
+            :param param_grid: Dictionary of hyperparameters to search
+            :param cache_file: Path to save/load cached results
+            :param cv: Number of folds for cross-validation
+            :param scoring: Scoring method (e.g., 'f1_macro', 'accuracy')
+            :param verbose: Whether to print progress and results
+            :param fixed_params: Any fixed parameters to pass to the model
+            """
+            self.estimator_class = estimator_class
+            self.param_grid = list(ParameterGrid(param_grid))
+            self.cache_file = cache_file
+            self.cv = cv
+            self.verbose = verbose
+            self.scoring = scoring
+            self.fixed_params = fixed_params or {}
+            self.best_score = -np.inf
+            self.best_params = None
+            self.cache = {}
+
+            if cache_file and os.path.exists(cache_file):
+                with open(cache_file, 'rb') as f:
+                    self.cache = pickle.load(f)
+                if verbose:
+                    print(f"Loaded {len(self.cache)} cached results from {cache_file}")
+
+        def search(self, X, y):
+            for params in tqdm(self.param_grid, desc=f"{self.cv}-Fold CV"):
+                key = tuple(sorted(params.items()))
+                if key in self.cache:
+                    score = self.cache[key]
+                else:
+                    model = self.estimator_class(**self.fixed_params, **params)
+                    scores = cross_val_score(model, X, y, cv=self.cv, scoring=self.scoring, n_jobs=-1)
+                    score = np.mean(scores)
+                    self.cache[key] = score
+                    if self.cache_file:
+                        with open(self.cache_file, 'wb') as f:
+                            pickle.dump(self.cache, f)
+
+                if self.verbose:
+                    print(f"Params: {params}, Score: {score:.4f}")
+
+                if score > self.best_score:
+                    self.best_score = score
+                    self.best_params = params
+
+            if self.verbose:
+                print(f"\nBest Params: {self.best_params}")
+                print(f"Best Score ({self.cv}-fold CV): {self.best_score:.4f}")
+
+            return self.best_params, self.best_score
+    
+    class HalvingGridSearch:
+        def __init__(self, estimator, param_grid, scoring='f1_macro', cv=3, factor=2, cache_file=None, verbose=1):
+            """
+            Successive halving grid search using HalvingGridSearchCV.
+
+            :param estimator: Scikit-learn model instance (with fixed params applied)
+            :param param_grid: Dictionary of parameter grid to search
+            :param scoring: Scoring metric string (e.g., 'f1_macro')
+            :param cv: Number of cross-validation folds
+            :param factor: Halving factor (e.g., 2, 3)
+            :param cache_file: Optional path to cache the fitted search object
+            :param verbose: Verbosity level
+            """
+            self.estimator = estimator
+            self.param_grid = param_grid
+            self.scoring = scoring
+            self.cv = cv
+            self.factor = factor
+            self.cache_file = cache_file
+            self.verbose = verbose
+            self.search = None
+
+        def search_and_fit(self, X, y):
+            if self.cache_file and os.path.exists(self.cache_file):
+                with open(self.cache_file, 'rb') as f:
+                    self.search = pickle.load(f)
+                print(f"Loaded HalvingGridSearchCV from cache: {self.cache_file}")
+            else:
+                self.search = HalvingGridSearchCV(
+                    estimator=self.estimator,
+                    param_grid=self.param_grid,
+                    scoring=self.scoring,
+                    cv=self.cv,
+                    factor=self.factor,
+                    n_jobs=-1,
+                    verbose=self.verbose
+                )
+                print("Running HalvingGridSearchCV...")
+                self.search.fit(X, y)
+                if self.cache_file:
+                    with open(self.cache_file, 'wb') as f:
+                        pickle.dump(self.search, f)
+                    print(f"Saved HalvingGridSearchCV to cache: {self.cache_file}")
+
+            print(f"Best Params: {self.search.best_params_}")
+            print(f"Best Score: {self.search.best_score_:.4f}")
+            return self.search.best_estimator_, self.search.best_params_, self.search.best_score_
