@@ -1,9 +1,5 @@
 # Media Bias Detection through Topic Clustering and Outlet-Specific Language Models
 
-**Group ID**: 7  
-**Course**: Machine Learning – Bocconi University  
-**Branch**: `media-bias`
-
 ## Overview
 
 This project explores how different media outlets semantically and emotionally frame global issues. It aims to identify variations in coverage, tone, and topic emphasis, and investigates whether language models can detect and characterize such media bias.
