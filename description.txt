@@ -1,0 +1,14 @@
+Track 1 (Classic ML):
+I used a character-level TF-IDF vectorizer with 2-6 n-grams and a maximum of 50,000 features. 
+I trained a Logistic Regression model with ElasticNet regularization (C=1.0, l1_ratio=0.3) using the SAGA solver. 
+The model was evaluated on the dev set and used to generate final predictions on the test set.
+
+Track 2 (BERT-style):
+I fine-tuned a pretrained roberta-base model using the HuggingFace Transformers library. 
+The model was trained for 4 epochs with a learning rate of 2e-5, batch size of 32, and max sequence length of 256. 
+I applied weight decay (0.01) and used mixed precision training to optimize performance. The best checkpoint based on dev Macro F1 was used for test predictions.
+
+Track 3 (Open):
+I created a stacking ensemble using predictions from the TF-IDF + Logistic Regression model and an XGBoost classifier. 
+I trained both base models on the training set and used their predicted probabilities on the dev set as features for a Logistic Regression meta-model. 
+This final model was used to predict the test set labels.
